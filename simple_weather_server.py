@@ -1,4 +1,10 @@
-from mcp.server.fastmcp import FastMCP
+#!/usr/bin/env python3
+"""
+Simple HTTP server for weather API testing
+This provides a simple REST API that mimics the MCP server structure for testing
+"""
+
+from flask import Flask, request, jsonify
 import requests
 from typing import Dict, Any
 
@@ -6,8 +12,15 @@ from typing import Dict, Any
 API_KEY = "366fd563131a4af1bd962603252105"
 BASE_URL = "http://api.weatherapi.com/v1"
 
-# Initialize MCP server
-mcp = FastMCP("weather-api-mcp")
+app = Flask(__name__)
+
+# Add CORS headers to all responses
+@app.after_request
+def after_request(response):
+    response.headers.add('Access-Control-Allow-Origin', '*')
+    response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
+    response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
+    return response
 
 def get_current_weather(city: str) -> Dict[str, Any]:
     """Get current weather for a city using WeatherAPI"""
@@ -16,7 +29,7 @@ def get_current_weather(city: str) -> Dict[str, Any]:
         response = requests.get(url, timeout=10)
         response.raise_for_status()
         data = response.json()
-
+        
         return {
             "city": data.get("location", {}).get("name"),
             "country": data.get("location", {}).get("country"),
@@ -48,7 +61,7 @@ def get_weather_forecast(city: str, days: int = 3) -> Dict[str, Any]:
         response = requests.get(url, timeout=10)
         response.raise_for_status()
         data = response.json()
-
+        
         forecast_days = []
         for day in data.get("forecast", {}).get("forecastday", []):
             forecast_days.append({
@@ -65,7 +78,7 @@ def get_weather_forecast(city: str, days: int = 3) -> Dict[str, Any]:
                 "avg_humidity": day.get("day", {}).get("avghumidity"),
                 "uv_index": day.get("day", {}).get("uv")
             })
-
+        
         return {
             "city": data.get("location", {}).get("name"),
             "country": data.get("location", {}).get("country"),
@@ -102,60 +115,98 @@ def search_locations(query: str) -> Dict[str, Any]:
     except Exception as e:
         return {"error": f"Unexpected error: {str(e)}"}
 
-@mcp.tool()
-async def get_current_weather_tool(city: str) -> dict:
-    """
-    Get current weather information for a specific city.
+@app.route('/tools/get_current_weather_tool/invoke', methods=['POST'])
+def current_weather_endpoint():
+    """MCP-style endpoint for current weather"""
+    try:
+        data = request.get_json()
+        city = data.get('input', {}).get('city', '')
+        if not city:
+            return jsonify({"error": "City parameter is required"}), 400
+        
+        result = get_current_weather(city)
+        return jsonify({"output": result})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
-    Args:
-        city: Name of the city to get weather for
+@app.route('/tools/get_weather_forecast_tool/invoke', methods=['POST'])
+def forecast_endpoint():
+    """MCP-style endpoint for weather forecast"""
+    try:
+        data = request.get_json()
+        city = data.get('input', {}).get('city', '')
+        days = data.get('input', {}).get('days', 3)
+        
+        if not city:
+            return jsonify({"error": "City parameter is required"}), 400
+        
+        if days < 1 or days > 10:
+            return jsonify({"error": "Days must be between 1 and 10"}), 400
+        
+        result = get_weather_forecast(city, days)
+        return jsonify({"output": result})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
-    Returns:
-        Current weather data including temperature, conditions, humidity, wind, etc.
-    """
-    return get_current_weather(city)
+@app.route('/tools/search_locations_tool/invoke', methods=['POST'])
+def search_locations_endpoint():
+    """MCP-style endpoint for location search"""
+    try:
+        data = request.get_json()
+        query = data.get('input', {}).get('query', '')
+        if not query:
+            return jsonify({"error": "Query parameter is required"}), 400
 
-@mcp.tool()
-async def get_weather_forecast_tool(city: str, days: int = 3) -> dict:
-    """
-    Get weather forecast for a specific city.
+        result = search_locations(query)
+        return jsonify({"output": result})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
-    Args:
-        city: Name of the city to get forecast for
-        days: Number of days to forecast (1-10, default: 3)
+@app.route('/tools/get_live_temp/invoke', methods=['POST'])
+def legacy_endpoint():
+    """Legacy endpoint for backward compatibility"""
+    try:
+        data = request.get_json()
+        city = data.get('input', {}).get('city', '')
+        if not city:
+            return jsonify({"error": "City parameter is required"}), 400
 
-    Returns:
-        Weather forecast data for the specified number of days
-    """
-    if days < 1 or days > 10:
-        return {"error": "Days must be between 1 and 10"}
-    return get_weather_forecast(city, days)
+        result = get_current_weather(city)
+        return jsonify({"output": result})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
-@mcp.tool()
-async def search_locations_tool(query: str) -> dict:
-    """
-    Search for locations by name.
+@app.route('/health', methods=['GET'])
+def health_check():
+    """Health check endpoint"""
+    return jsonify({"status": "healthy", "service": "WeatherAPI MCP Server"})
 
-    Args:
-        query: Location name or partial name to search for
-
-    Returns:
-        List of matching locations with their details
-    """
-    return search_locations(query)
-
-# Legacy tool for backward compatibility
-@mcp.tool()
-async def get_live_temp(city: str) -> dict:
-    """
-    Legacy tool: Get current temperature for a city (for backward compatibility).
-    Use get_current_weather_tool for more detailed information.
-    """
-    result = get_current_weather(city)
-    return result
+@app.route('/', methods=['GET'])
+def root():
+    """Root endpoint with API information"""
+    return jsonify({
+        "service": "WeatherAPI MCP Server",
+        "version": "1.0.0",
+        "endpoints": [
+            "/tools/get_current_weather_tool/invoke",
+            "/tools/get_weather_forecast_tool/invoke",
+            "/tools/search_locations_tool/invoke",
+            "/tools/get_live_temp/invoke",
+            "/health"
+        ],
+        "api_key_status": "configured" if API_KEY else "missing"
+    })
 
 if __name__ == "__main__":
-    print("Starting WeatherAPI MCP Server...")
+    print("🌤️  Starting WeatherAPI MCP Server (Flask)")
     print(f"Using API Key: {API_KEY[:10]}...")
-    print("Starting server...")
-    mcp.run()
+    print("Server will be available at http://localhost:8000")
+    print("Available endpoints:")
+    print("  - POST /tools/get_current_weather_tool/invoke")
+    print("  - POST /tools/get_weather_forecast_tool/invoke")
+    print("  - POST /tools/search_locations_tool/invoke")
+    print("  - POST /tools/get_live_temp/invoke")
+    print("  - GET /health")
+    print("  - GET /")
+    
+    app.run(host='0.0.0.0', port=8000, debug=True)

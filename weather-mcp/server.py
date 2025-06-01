@@ -1,22 +1,38 @@
-from mcp.server.fastmcp import FastMCP
+#!/usr/bin/env python3
+"""
+WeatherAPI MCP Server
+A Model Context Protocol server for weather data using WeatherAPI.com
+"""
+
+import os
 import requests
 from typing import Dict, Any
+from dotenv import load_dotenv
+from fastmcp import FastMCP
 
-# WeatherAPI configuration
-API_KEY = "366fd563131a4af1bd962603252105"
+# Load environment variables
+load_dotenv()
+
+# Configuration from environment
+API_KEY = os.getenv("WEATHER_API_KEY")
 BASE_URL = "http://api.weatherapi.com/v1"
+API_TIMEOUT = int(os.getenv("API_TIMEOUT", "10"))
+API_LANGUAGE = os.getenv("API_LANGUAGE", "tr")
+
+if not API_KEY:
+    raise ValueError("WEATHER_API_KEY environment variable is required")
 
 # Initialize MCP server
 mcp = FastMCP("weather-api-mcp")
 
 def get_current_weather(city: str) -> Dict[str, Any]:
     """Get current weather for a city using WeatherAPI"""
-    url = f"{BASE_URL}/current.json?key={API_KEY}&q={city}&lang=tr"
+    url = f"{BASE_URL}/current.json?key={API_KEY}&q={city}&lang={API_LANGUAGE}"
     try:
-        response = requests.get(url, timeout=10)
+        response = requests.get(url, timeout=API_TIMEOUT)
         response.raise_for_status()
         data = response.json()
-
+        
         return {
             "city": data.get("location", {}).get("name"),
             "country": data.get("location", {}).get("country"),
@@ -43,12 +59,12 @@ def get_current_weather(city: str) -> Dict[str, Any]:
 
 def get_weather_forecast(city: str, days: int = 3) -> Dict[str, Any]:
     """Get weather forecast for a city using WeatherAPI"""
-    url = f"{BASE_URL}/forecast.json?key={API_KEY}&q={city}&days={days}&lang=tr"
+    url = f"{BASE_URL}/forecast.json?key={API_KEY}&q={city}&days={days}&lang={API_LANGUAGE}"
     try:
-        response = requests.get(url, timeout=10)
+        response = requests.get(url, timeout=API_TIMEOUT)
         response.raise_for_status()
         data = response.json()
-
+        
         forecast_days = []
         for day in data.get("forecast", {}).get("forecastday", []):
             forecast_days.append({
@@ -65,7 +81,7 @@ def get_weather_forecast(city: str, days: int = 3) -> Dict[str, Any]:
                 "avg_humidity": day.get("day", {}).get("avghumidity"),
                 "uv_index": day.get("day", {}).get("uv")
             })
-
+        
         return {
             "city": data.get("location", {}).get("name"),
             "country": data.get("location", {}).get("country"),
@@ -81,10 +97,10 @@ def search_locations(query: str) -> Dict[str, Any]:
     """Search for locations using WeatherAPI"""
     url = f"{BASE_URL}/search.json?key={API_KEY}&q={query}"
     try:
-        response = requests.get(url, timeout=10)
+        response = requests.get(url, timeout=API_TIMEOUT)
         response.raise_for_status()
         data = response.json()
-
+        
         locations = []
         for location in data:
             locations.append({
@@ -95,7 +111,7 @@ def search_locations(query: str) -> Dict[str, Any]:
                 "lon": location.get("lon"),
                 "url": location.get("url")
             })
-
+        
         return {"locations": locations}
     except requests.exceptions.RequestException as e:
         return {"error": f"API request failed: {str(e)}"}
@@ -106,10 +122,10 @@ def search_locations(query: str) -> Dict[str, Any]:
 async def get_current_weather_tool(city: str) -> dict:
     """
     Get current weather information for a specific city.
-
+    
     Args:
         city: Name of the city to get weather for
-
+        
     Returns:
         Current weather data including temperature, conditions, humidity, wind, etc.
     """
@@ -119,11 +135,11 @@ async def get_current_weather_tool(city: str) -> dict:
 async def get_weather_forecast_tool(city: str, days: int = 3) -> dict:
     """
     Get weather forecast for a specific city.
-
+    
     Args:
         city: Name of the city to get forecast for
         days: Number of days to forecast (1-10, default: 3)
-
+        
     Returns:
         Weather forecast data for the specified number of days
     """
@@ -135,27 +151,17 @@ async def get_weather_forecast_tool(city: str, days: int = 3) -> dict:
 async def search_locations_tool(query: str) -> dict:
     """
     Search for locations by name.
-
+    
     Args:
         query: Location name or partial name to search for
-
+        
     Returns:
         List of matching locations with their details
     """
     return search_locations(query)
 
-# Legacy tool for backward compatibility
-@mcp.tool()
-async def get_live_temp(city: str) -> dict:
-    """
-    Legacy tool: Get current temperature for a city (for backward compatibility).
-    Use get_current_weather_tool for more detailed information.
-    """
-    result = get_current_weather(city)
-    return result
-
 if __name__ == "__main__":
-    print("Starting WeatherAPI MCP Server...")
-    print(f"Using API Key: {API_KEY[:10]}...")
-    print("Starting server...")
+    print("🌤️  Starting WeatherAPI MCP Server...")
+    print(f"Using API Key: {API_KEY[:10] if API_KEY else 'NOT SET'}...")
+    print("Server starting...")
     mcp.run()
